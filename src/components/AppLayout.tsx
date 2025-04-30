@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -133,13 +134,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
                 <SidebarInset className="flex flex-col flex-1">
                      <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 md:hidden">
-                        {/* Mobile Header - Removed asChild from SidebarTrigger */}
-                         <SidebarTrigger>
-                            <Button size="icon" variant="outline">
-                                <Menu className="h-5 w-5" />
-                                <span className="sr-only">Toggle Menu</span>
-                            </Button>
-                        </SidebarTrigger>
+                        {/* Mobile Header - Use SidebarTrigger directly */}
+                         <SidebarTrigger />
+                         {/* Removed the nested Button here:
+                          <SidebarTrigger>
+                             <Button size="icon" variant="outline">
+                                 <Menu className="h-5 w-5" />
+                                 <span className="sr-only">Toggle Menu</span>
+                             </Button>
+                         </SidebarTrigger>
+                         */}
                         <h1 className="text-lg font-semibold text-primary">StudyHub</h1>
                     </header>
                     <main className="flex-1 p-4 md:p-6 overflow-auto">
@@ -151,3 +155,4 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </AuthGuard>
   );
 }
+
