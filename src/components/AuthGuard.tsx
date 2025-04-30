@@ -1,27 +1,27 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
 
+interface AuthGuardProps {
+  children: ReactNode;
+}
 
-export default function Home() {
+export function AuthGuard({ children }: AuthGuardProps) {
   const { user, loading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading) {
-      if (user) {
-        router.replace("/profile"); // Redirect authenticated users to profile
-      } else {
-        router.replace("/login"); // Redirect unauthenticated users to login
-      }
+    if (!loading && !user) {
+      router.push("/login"); // Redirect to login if not authenticated
     }
   }, [user, loading, router]);
 
-   // Display loading state while checking auth status
-  if (loading) {
+  if (loading || !user) {
+     // Show loading state or redirect placeholder while checking auth
      return (
          <div className="flex items-center justify-center min-h-screen">
               <Skeleton className="h-12 w-1/2 rounded-md" />
@@ -29,6 +29,5 @@ export default function Home() {
         );
   }
 
-  // This part should ideally not be reached due to redirects
-  return null;
+  return <>{children}</>;
 }
