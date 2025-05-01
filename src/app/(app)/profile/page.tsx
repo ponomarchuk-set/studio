@@ -182,7 +182,6 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-primary">Your Profile</h1>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          {/* Removed collapsible prop */}
           <Accordion type="multiple" className="w-full space-y-4">
             {profileSections.map((sectionName) => (
               <ProfileSection
@@ -237,9 +236,9 @@ function ProfileSection({ control, sectionName, title, register }: ProfileSectio
                     name={`${sectionName}.${index}.key`}
                     render={({ field: keyField }) => (
                       <FormItem className="flex-1">
-                        <FormLabel>Key</FormLabel>
+                        {/* Removed FormLabel for Key */}
                         <FormControl>
-                          <Input placeholder="e.g., City" {...keyField} />
+                          <Input placeholder="Key (e.g., City)" {...keyField} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -250,9 +249,9 @@ function ProfileSection({ control, sectionName, title, register }: ProfileSectio
                     name={`${sectionName}.${index}.value`}
                     render={({ field: valueField }) => (
                       <FormItem className="flex-1">
-                        <FormLabel>Value</FormLabel>
+                         {/* Removed FormLabel for Value */}
                         <FormControl>
-                          <Input placeholder="e.g., New York" {...valueField} />
+                          <Input placeholder="Value (e.g., New York)" {...valueField} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>

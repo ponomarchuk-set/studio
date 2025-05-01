@@ -1,3 +1,4 @@
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StudyHub", // Updated title
+  title: "ISR housing", // Updated title
   description: "A collaborative studying web app.", // Updated description
 };
 
@@ -37,3 +38,4 @@ export default function RootLayout({
     </html>
   );
 }
+

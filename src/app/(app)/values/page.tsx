@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -193,9 +194,9 @@ export default function ValuesPage() {
                           name={`values.${index}.name`}
                           render={({ field: nameField }) => (
                             <FormItem className="flex-1 w-full md:w-auto">
-                              <FormLabel>Value Name</FormLabel>
+                               {/* Removed FormLabel for Value Name */}
                               <FormControl>
-                                <Input placeholder="e.g., Honesty, Growth" {...nameField} />
+                                <Input placeholder="Value (e.g., Honesty, Growth)" {...nameField} />
                               </FormControl>
                               <FormMessage />
                             </FormItem>

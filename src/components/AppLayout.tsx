@@ -87,7 +87,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                      <SidebarHeader className="p-4 flex items-center justify-between">
                         <Link href="/" className="flex items-center gap-2 text-lg font-semibold text-primary">
                           <Home className="h-6 w-6" />
-                          <span>StudyHub</span>
+                          <span>ISR housing</span> {/* Updated App Name */}
                         </Link>
                         {/* SidebarTrigger is automatically handled by SidebarProvider */}
                     </SidebarHeader>
@@ -135,7 +135,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <SidebarInset className="flex flex-col flex-1">
                      <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6 md:hidden">
                         {/* Mobile Header - Use SidebarTrigger directly */}
-                         <SidebarTrigger />
+                         <SidebarTrigger asChild>
+                              <Button size="icon" variant="outline">
+                                <Menu className="h-5 w-5" />
+                                <span className="sr-only">Toggle Menu</span>
+                              </Button>
+                         </SidebarTrigger>
                          {/* Removed the nested Button here:
                           <SidebarTrigger>
                              <Button size="icon" variant="outline">
@@ -144,7 +149,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                              </Button>
                          </SidebarTrigger>
                          */}
-                        <h1 className="text-lg font-semibold text-primary">StudyHub</h1>
+                        <h1 className="text-lg font-semibold text-primary">ISR housing</h1> {/* Updated App Name */}
                     </header>
                     <main className="flex-1 p-4 md:p-6 overflow-auto">
                         {children}
@@ -155,4 +160,3 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     </AuthGuard>
   );
 }
-
