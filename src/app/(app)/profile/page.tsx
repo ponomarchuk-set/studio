@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, setDoc, DocumentData, collection, setDoc as setFirestoreDoc } from "firebase/firestore"; // Use specific import for clarity
+import { doc, getDoc, setDoc, DocumentData, collection, setDoc as setFirestoreDoc, getDocs } from "firebase/firestore"; // Use specific import for clarity, Added getDocs
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -14,13 +14,14 @@ import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/componen
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { PlusCircle, Trash2 } from "lucide-react";
+import { PlusCircle, Trash2, UserSearch } from "lucide-react"; // Added UserSearch icon
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserSelectorDialog, type RegisteredUser } from "@/components/UserSelectorDialog"; // Import UserSelectorDialog
 
 // Define the schema for a single key-value pair
 const ProfileItemSchema = z.object({
   key: z.string().min(1, "Key cannot be empty"),
-  value: z.string().min(1, "Value cannot be empty"), // Keeping value as string for simplicity
+  value: z.string().min(1, "Value cannot be empty"), // Keeping value as string for simplicity (UID for social relations)
 });
 
 // Define the schema for a profile section (e.g., Demographics)
@@ -62,6 +63,8 @@ export default function ProfilePage() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [registeredUsers, setRegisteredUsers] = useState<RegisteredUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   const form = useForm<ProfileFormData>({
     resolver: zodResolver(ProfileSchema),
@@ -128,9 +131,35 @@ export default function ProfilePage() {
     }
   }, [user, toast, form]);
 
+  // Fetch registered users for the selector
+  const fetchRegisteredUsers = useCallback(async () => {
+    setLoadingUsers(true);
+    try {
+        const usersCol = collection(db, "users");
+        const usersSnapshot = await getDocs(usersCol);
+        const usersList = usersSnapshot.docs.map(doc => ({
+            uid: doc.id,
+            email: doc.data().email || "No email", // Assuming email is stored
+        }));
+        setRegisteredUsers(usersList);
+    } catch (error) {
+        console.error("Error fetching registered users:", error);
+        toast({
+            variant: "destructive",
+            title: "Error",
+            description: "Could not load registered users.",
+        });
+        setRegisteredUsers([]); // Reset on error
+    } finally {
+        setLoadingUsers(false);
+    }
+  }, [toast]);
+
+
   useEffect(() => {
     fetchProfileData();
-  }, [fetchProfileData]);
+    fetchRegisteredUsers(); // Fetch users when component mounts
+  }, [fetchProfileData, fetchRegisteredUsers]);
 
 
   const onSubmit = async (data: ProfileFormData) => {
@@ -182,7 +211,7 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-primary">Your Profile</h1>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <Accordion type="multiple" className="w-full space-y-4">
+          <Accordion type="multiple" collapsible={true} className="w-full space-y-4">
             {profileSections.map((sectionName) => (
               <ProfileSection
                 key={sectionName}
@@ -190,6 +219,10 @@ export default function ProfilePage() {
                 sectionName={sectionName}
                 title={sectionTitles[sectionName]}
                 register={form.register}
+                setValue={form.setValue} // Pass setValue
+                registeredUsers={registeredUsers} // Pass users
+                loadingUsers={loadingUsers} // Pass loading state
+                getValues={form.getValues} // Pass getValues
               />
             ))}
           </Accordion>
@@ -209,17 +242,47 @@ interface ProfileSectionProps {
   sectionName: keyof ProfileFormData;
   title: string;
   register: any; // Type appropriately
+  setValue: any; // Add setValue from react-hook-form
+  getValues: any; // Add getValues
+  registeredUsers: RegisteredUser[]; // Add registered users
+  loadingUsers: boolean; // Add loading state for users
 }
 
-function ProfileSection({ control, sectionName, title, register }: ProfileSectionProps) {
+function ProfileSection({ control, sectionName, title, register, setValue, getValues, registeredUsers, loadingUsers }: ProfileSectionProps) {
   const { fields, append, remove } = useFieldArray({
     control,
     name: sectionName,
   });
 
+   const [isUserSelectorOpen, setIsUserSelectorOpen] = useState(false);
+   const [currentUserIndex, setCurrentUserIndex] = useState<number | null>(null);
+
+
   const addNewField = () => {
      append({ key: "", value: "" }, { shouldFocus: true });
   };
+
+  const openUserSelector = (index: number) => {
+      setCurrentUserIndex(index);
+      setIsUserSelectorOpen(true);
+  };
+
+   const handleUserSelect = (selectedUser: RegisteredUser | null) => {
+     if (selectedUser && currentUserIndex !== null) {
+       // Store the UID as the value
+       setValue(`${sectionName}.${currentUserIndex}.value`, selectedUser.uid, { shouldValidate: true, shouldDirty: true });
+     }
+     setIsUserSelectorOpen(false);
+     setCurrentUserIndex(null);
+   };
+
+   // Helper to get display value for Social Relations
+   const getSocialRelationDisplayValue = (index: number): string => {
+        const uid = getValues(`${sectionName}.${index}.value`);
+        if (!uid) return "Select User";
+        const user = registeredUsers.find(u => u.uid === uid);
+        return user ? user.email : uid; // Display email or fallback to UID
+   };
 
 
   return (
@@ -228,9 +291,10 @@ function ProfileSection({ control, sectionName, title, register }: ProfileSectio
           <span className="text-xl font-semibold text-primary">{title}</span>
         </AccordionTrigger>
         <AccordionContent className="px-6 pb-6 pt-0">
-          <div className="space-y-4">
+           <div className="space-y-4"> {/* Container for all fields in the section */}
               {fields.map((field, index) => (
-                <div key={field.id} className="flex items-end gap-2 p-3 border rounded-md bg-background">
+                <div key={field.id} className="flex items-end gap-2 border-b pb-3 last:border-b-0"> {/* Group fields horizontally, add bottom border */}
+                   {/* Key Field */}
                    <FormField
                     control={control}
                     name={`${sectionName}.${index}.key`}
@@ -238,26 +302,69 @@ function ProfileSection({ control, sectionName, title, register }: ProfileSectio
                       <FormItem className="flex-1">
                         {/* Removed FormLabel for Key */}
                         <FormControl>
-                          <Input placeholder="Key (e.g., City)" {...keyField} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={control}
-                    name={`${sectionName}.${index}.value`}
-                    render={({ field: valueField }) => (
-                      <FormItem className="flex-1">
-                         {/* Removed FormLabel for Value */}
-                        <FormControl>
-                          <Input placeholder="Value (e.g., New York)" {...valueField} />
+                           <Input placeholder={`Key ${index + 1}`} {...keyField} aria-label={`Key for ${title} item ${index + 1}`} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
 
+                   {/* Value Field - Conditional Rendering for Social Relations */}
+                   {sectionName === "socialRelations" ? (
+                        <FormItem className="flex-1">
+                            {/* Removed FormLabel for Value */}
+                            <div className="flex items-center gap-1">
+                                 <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="flex-1 justify-start text-left font-normal"
+                                    onClick={() => openUserSelector(index)}
+                                    disabled={loadingUsers}
+                                    aria-label={`Select user for ${title} item ${index + 1}`}
+                                 >
+                                     <span className="truncate">{getSocialRelationDisplayValue(index)}</span>
+                                </Button>
+                                 <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openUserSelector(index)}
+                                    disabled={loadingUsers}
+                                    aria-label={`Search user for ${title} item ${index + 1}`}
+                                    className="text-muted-foreground"
+                                >
+                                    <UserSearch className="h-4 w-4" />
+                                </Button>
+                            </div>
+                            {/* Hidden input to actually store the UID */}
+                            <FormField
+                                control={control}
+                                name={`${sectionName}.${index}.value`}
+                                render={({ field: valueField }) => (
+                                    <FormControl>
+                                        <Input type="hidden" {...valueField} />
+                                    </FormControl>
+                                )}
+                             />
+                           <FormMessage />
+                        </FormItem>
+                   ) : (
+                       <FormField
+                        control={control}
+                        name={`${sectionName}.${index}.value`}
+                        render={({ field: valueField }) => (
+                            <FormItem className="flex-1">
+                                {/* Removed FormLabel for Value */}
+                                <FormControl>
+                                <Input placeholder={`Value ${index + 1}`} {...valueField} aria-label={`Value for ${title} item ${index + 1}`} />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                      />
+                   )}
+
+                  {/* Remove Button */}
                   <Button
                     type="button"
                     variant="ghost"
@@ -281,6 +388,17 @@ function ProfileSection({ control, sectionName, title, register }: ProfileSectio
                 <PlusCircle className="mr-2 h-4 w-4" /> Add New Item
              </Button>
         </AccordionContent>
+
+         {/* User Selector Dialog */}
+        {sectionName === "socialRelations" && (
+             <UserSelectorDialog
+                isOpen={isUserSelectorOpen}
+                onClose={() => setIsUserSelectorOpen(false)}
+                users={registeredUsers}
+                onSelectUser={handleUserSelect}
+                isLoading={loadingUsers}
+            />
+        )}
       </AccordionItem>
   );
 }

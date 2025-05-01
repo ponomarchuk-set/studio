@@ -194,7 +194,6 @@ export default function ValuesPage() {
                           name={`values.${index}.name`}
                           render={({ field: nameField }) => (
                             <FormItem className="flex-1 w-full md:w-auto">
-                               {/* Removed FormLabel for Value Name */}
                               <FormControl>
                                 <Input placeholder="Value (e.g., Honesty, Growth)" {...nameField} />
                               </FormControl>
@@ -289,3 +288,4 @@ export default function ValuesPage() {
     </div>
   );
 }
+
