@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -181,7 +182,7 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-primary">Your Profile</h1>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <Accordion type="multiple" collapsible={true} className="w-full space-y-4">
+          <Accordion type="multiple" className="w-full space-y-4">
             {profileSections.map((sectionName) => (
               <ProfileSection
                 key={sectionName}
@@ -283,3 +284,4 @@ function ProfileSection({ control, sectionName, title, register }: ProfileSectio
       </AccordionItem>
   );
 }
+
