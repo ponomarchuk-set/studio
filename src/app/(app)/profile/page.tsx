@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/lib/firebase";
-import { doc, getDoc, setDoc, DocumentData } from "firebase/firestore";
+import { doc, getDoc, setDoc, DocumentData, collection, setDoc as setFirestoreDoc } from "firebase/firestore"; // Use specific import for clarity
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -89,15 +89,30 @@ export default function ProfilePage() {
           }, {} as ProfileFormData);
         form.reset(validatedData);
       } else {
-        // Initialize with default empty structure if no profile exists
-         form.reset({
+         // If profile doc doesn't exist, create it with default empty structure
+         console.log("Profile document not found for user:", user.uid, ". Creating one.");
+         const defaultProfileData: ProfileFormData = {
             demographics: [],
             geography: [],
             socialRelations: [],
             features: [],
             skills: [],
             contacts: [],
-         });
+         };
+         // Use setFirestoreDoc here to ensure the document is created
+         await setFirestoreDoc(docRef, defaultProfileData);
+         form.reset(defaultProfileData);
+         console.log("Created new profile document for user:", user.uid);
+
+         // Also ensure the 'users' collection document exists
+         const userDocRef = doc(db, "users", user.uid);
+         const userDocSnap = await getDoc(userDocRef);
+         if (!userDocSnap.exists()) {
+             console.log("'users' document not found for user:", user.uid, ". Creating one.");
+             await setFirestoreDoc(userDocRef, { email: user.email }); // Store email or other basic info
+             console.log("Created new 'users' document for user:", user.uid);
+         }
+
       }
     } catch (error) {
       console.error("Error fetching profile data:", error);
@@ -141,7 +156,7 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 p-4 md:p-6">
         <Skeleton className="h-10 w-1/4" />
          {profileSections.map((section) => (
             <Card key={section}>
@@ -166,7 +181,7 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-primary">Your Profile</h1>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <Accordion type="multiple" collapsible className="w-full space-y-4">
+          <Accordion type="multiple" collapsible={true} className="w-full space-y-4">
             {profileSections.map((sectionName) => (
               <ProfileSection
                 key={sectionName}
