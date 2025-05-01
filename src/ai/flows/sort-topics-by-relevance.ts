@@ -1,7 +1,8 @@
+
 // src/ai/flows/sort-topics-by-relevance.ts
 'use server';
 /**
- * @fileOverview Sorts topics (Chat, Voting) by relevance to a user's profile.
+ * @fileOverview Sorts topics (Chat, Voting, Tasks) by relevance to a user's profile.
  *
  * - sortTopicsByRelevance - A function that sorts topics based on user profile data.
  * - SortTopicsByRelevanceInput - The input type for the sortTopicsByRelevance function.
@@ -11,7 +12,10 @@
 import {ai} from '@/ai/ai-instance';
 import {z} from 'genkit';
 
-const ProfileDataSchema = z.record(z.string(), z.string().or(z.number()));
+// Expect a flat record of strings and numbers for the user profile
+const FlatProfileDataSchema = z.record(z.string(), z.string().or(z.number()))
+    .describe('A flat key-value representation of the user profile data.');
+
 
 const SortTopicsByRelevanceInputSchema = z.object({
   topics: z.array(
@@ -21,7 +25,7 @@ const SortTopicsByRelevanceInputSchema = z.object({
       content: z.string().describe('The content of the topic.'),
     })
   ).describe('An array of topics to be sorted.'),
-  userProfile: ProfileDataSchema.describe('The user profile data.'),
+  userProfile: FlatProfileDataSchema, // Use the flat schema
 });
 
 export type SortTopicsByRelevanceInput = z.infer<typeof SortTopicsByRelevanceInputSchema>;
@@ -29,59 +33,55 @@ export type SortTopicsByRelevanceInput = z.infer<typeof SortTopicsByRelevanceInp
 const SortTopicsByRelevanceOutputSchema = z.array(
   z.object({
     topicId: z.string().describe('The ID of the topic.'),
-    relevanceScore: z.number().describe('The relevance score of the topic for the user.'),
+    relevanceScore: z.number().min(0).max(100).describe('The relevance score (0-100) of the topic for the user.'), // Added min/max validation
   })
-).describe('An array of topics with their relevance scores, sorted by relevance.');
+).describe('An array of topics with their relevance scores, sorted by relevance score in descending order.');
 
 export type SortTopicsByRelevanceOutput = z.infer<typeof SortTopicsByRelevanceOutputSchema>;
 
 export async function sortTopicsByRelevance(input: SortTopicsByRelevanceInput): Promise<SortTopicsByRelevanceOutput> {
+  // Validate input before calling the flow (optional but good practice)
+  const validation = SortTopicsByRelevanceInputSchema.safeParse(input);
+  if (!validation.success) {
+    console.error("Invalid input to sortTopicsByRelevance:", validation.error);
+    // Handle error appropriately, e.g., return empty array or throw
+    return [];
+  }
   return sortTopicsByRelevanceFlow(input);
 }
 
 const sortTopicsPrompt = ai.definePrompt({
   name: 'sortTopicsPrompt',
   input: {
-    schema: z.object({
-      topics: z.array(
-        z.object({
-          topicId: z.string().describe('The ID of the topic.'),
-          title: z.string().describe('The title of the topic.'),
-          content: z.string().describe('The content of the topic.'),
-        })
-      ).describe('An array of topics to be sorted.'),
-      userProfile: z.record(z.string(), z.string().or(z.number())).describe('The user profile data.'),
-    }),
+    schema: SortTopicsByRelevanceInputSchema, // Use the updated input schema
   },
   output: {
-    schema: z.array(
-      z.object({
-        topicId: z.string().describe('The ID of the topic.'),
-        relevanceScore: z.number().describe('The relevance score of the topic for the user.'),
-      })
-    ).describe('An array of topics with their relevance scores, sorted by relevance.'),
+    schema: SortTopicsByRelevanceOutputSchema, // Use the updated output schema
   },
-  prompt: `You are an AI expert in determining the relevance of topics to a user based on their profile data.
+  prompt: `You are an AI expert in determining the relevance of various topics (like chat discussions, tasks, or voting items) to a user based on their profile data.
 
-  Given the following topics and user profile, determine a relevance score (0-100) for each topic, representing how relevant the topic is to the user.
+  Analyze the provided user profile information and the list of topics. For each topic, assign a relevance score between 0 (not relevant at all) and 100 (highly relevant).
 
-  User Profile:
-  {{#each (each userProfile)}}
+  User Profile (Key-Value Pairs):
+  {{#each userProfile}}
   {{@key}}: {{this}}
   {{/each}}
 
-  Topics:
+  Topics to Score:
   {{#each topics}}
+  ---
   Topic ID: {{topicId}}
   Title: {{title}}
-  Content: {{content}}
-  ---
+  Content/Description: {{content}}
   {{/each}}
+  ---
 
-  Return a JSON array of topic IDs and their corresponding relevance scores, sorted by relevance score in descending order.
-  Ensure the output is a valid JSON array.
+  Based on your analysis, return a JSON array containing objects for each topic. Each object must include the 'topicId' and its calculated 'relevanceScore'. The array should be sorted by 'relevanceScore' in descending order (most relevant first).
+
+  Ensure the output is ONLY the valid JSON array, adhering strictly to the required output format. Do not include any introductory text, explanations, or markdown formatting around the JSON.
   `,
 });
+
 
 const sortTopicsByRelevanceFlow = ai.defineFlow<
   typeof SortTopicsByRelevanceInputSchema,
@@ -92,33 +92,60 @@ const sortTopicsByRelevanceFlow = ai.defineFlow<
   outputSchema: SortTopicsByRelevanceOutputSchema,
 },
 async input => {
-  const {output} = await sortTopicsPrompt(input);
+    console.log("Input to sortTopicsByRelevanceFlow:", JSON.stringify(input, null, 2)); // Log input
 
-  // Attempt to parse the output as JSON.
-  try {
-    const parsedOutput = JSON.parse(output as any);
+    const {output, history} = await sortTopicsPrompt.generate({input}); // Use generate for more control
 
-    // Validate the parsed output against the schema.
-    const validationResult = z.array(
-      z.object({
-        topicId: z.string(),
-        relevanceScore: z.number(),
-      })
-    ).safeParse(parsedOutput);
+    console.log("Raw output from sortTopicsPrompt:", output); // Log raw output
+    // console.log("History:", JSON.stringify(history, null, 2)); // Log history if needed
 
-    if (validationResult.success) {
-      // Sort the topics by relevance score in descending order.
-      const sortedTopics = validationResult.data.sort((a, b) => b.relevanceScore - a.relevanceScore);
-      return sortedTopics as SortTopicsByRelevanceOutput;
-    } else {
-      console.error('Output validation failed:', validationResult.error);
-      // If validation fails, return a default or error response.
-      return [];
+
+  // Attempt to parse the output, assuming it's already a valid JSON object/array
+  // as requested by the prompt and defined by the output schema.
+  const parsedOutput = output; // No JSON.parse needed if output schema is respected
+
+  // Validate the parsed output against the schema.
+  const validationResult = SortTopicsByRelevanceOutputSchema.safeParse(parsedOutput);
+
+  if (validationResult.success) {
+    // Sort the topics by relevance score in descending order (already requested in prompt, but good to ensure).
+    const sortedTopics = validationResult.data.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    console.log("Successfully parsed and validated output:", sortedTopics);
+    return sortedTopics; // Return the validated and sorted data
+  } else {
+    console.error('Output validation failed:', validationResult.error.errors);
+    console.error('Received output:', parsedOutput);
+    // Try to recover if possible, or return a default/error state.
+    // If the output was a string that looked like JSON, try parsing it.
+    if (typeof parsedOutput === 'string') {
+        try {
+            const jsonParsed = JSON.parse(parsedOutput);
+            const reValidationResult = SortTopicsByRelevanceOutputSchema.safeParse(jsonParsed);
+            if (reValidationResult.success) {
+                 const sortedTopics = reValidationResult.data.sort((a, b) => b.relevanceScore - a.relevanceScore);
+                 console.warn("Output was string but successfully parsed and validated after JSON.parse:", sortedTopics);
+                 return sortedTopics;
+            } else {
+                 console.error('Re-validation after JSON.parse failed:', reValidationResult.error.errors);
+            }
+        } catch (parseError) {
+            console.error('Failed to parse string output as JSON:', parseError);
+        }
     }
-  } catch (e) {
-    console.error('Failed to parse JSON from the model output.', e);
+
+    // Fallback: Return empty array or throw an error
+    toast({ // Use toast for user feedback if applicable
+        variant: "destructive",
+        title: "AI Sorting Error",
+        description: "The AI failed to return relevance scores in the expected format. Using default order.",
+    });
     return [];
   }
 });
+
+// Helper function for toast (replace with your actual toast implementation)
+const toast = (options: {variant?: string, title: string, description: string}) => {
+    console.error(`Toast: ${options.title} - ${options.description}`);
+};
 
 

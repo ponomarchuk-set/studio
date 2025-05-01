@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
@@ -18,6 +19,7 @@ import {
   DocumentData,
   where,
   getDocs,
+  runTransaction, // Import runTransaction
 } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,6 +39,7 @@ import { sortTopicsByRelevance, SortTopicsByRelevanceInput, SortTopicsByRelevanc
 import { Skeleton } from '@/components/ui/skeleton';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { ProfileFormData } from '../profile/page'; // Import ProfileFormData type
 
 
 // Schemas
@@ -50,16 +53,39 @@ const NewVotingSchema = z.object({
   options: z.array(VotingOptionSchema).min(2, 'Must have at least two options.'),
 });
 
+type VotingTopicOption = {
+  text: string;
+  votes: number;
+  voters: string[];
+};
+
+
 type VotingTopic = {
   id: string;
   name: string;
   description: string;
   createdBy: string;
   createdAt: Timestamp;
-  options: { text: string; votes: number; voters: string[] }[]; // Store votes per option and who voted
+  options: VotingTopicOption[]; // Store votes per option and who voted
   creatorEmail?: string; // Optional
   totalVotes?: number; // Optional, calculated dynamically or stored
   userVote?: string; // Optional: store the text of the option the current user voted for
+};
+
+// Function to flatten the profile data (copied from ChatPage, could be moved to a util)
+const flattenProfileData = (profile: ProfileFormData | null): Record<string, string | number> => {
+    if (!profile) return {};
+    const flatProfile: Record<string, string | number> = {};
+    Object.entries(profile).forEach(([sectionKey, sectionValue]) => {
+      if (Array.isArray(sectionValue)) {
+        sectionValue.forEach((item: { key: string; value: string }) => {
+          if (item.key && item.value) {
+            flatProfile[`${sectionKey}_${item.key.replace(/\s+/g, '_')}`] = item.value;
+          }
+        });
+      }
+    });
+    return flatProfile;
 };
 
 
@@ -86,12 +112,12 @@ export default function VotingPage() {
   });
 
     // Fetch User Profile for Relevance Sorting
-  const fetchUserProfile = useCallback(async (): Promise<DocumentData | null> => {
+  const fetchUserProfile = useCallback(async (): Promise<ProfileFormData | null> => { // Return ProfileFormData
     if (!user) return null;
     try {
       const profileRef = doc(db, 'profiles', user.uid);
       const profileSnap = await getDoc(profileRef);
-      return profileSnap.exists() ? profileSnap.data() : null;
+      return profileSnap.exists() ? profileSnap.data() as ProfileFormData : null; // Cast to ProfileFormData
     } catch (error) {
       console.error("Error fetching user profile for relevance:", error);
       return null;
@@ -102,7 +128,7 @@ export default function VotingPage() {
   // Fetch and Sort Votings
   useEffect(() => {
     setLoading(true);
-    setIsSorting(true);
+
     const q = query(collection(db, 'votings'), orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
@@ -115,7 +141,7 @@ export default function VotingPage() {
          try {
            if(userId === user?.uid) return user?.email || 'Unknown User';
            const userDoc = await getDoc(doc(db, 'users', userId)); // Assuming a 'users' collection
-           const email = userDoc.exists() ? userDoc.data().email : 'Unknown User';
+           const email = userDoc.exists() && userDoc.data()?.email ? userDoc.data().email : 'Unknown User';
            userEmails[userId] = email;
            return email;
          } catch (error) {
@@ -154,18 +180,22 @@ export default function VotingPage() {
       setVotings(fetchedVotings); // Update raw list
 
       // Sort by relevance using AI
-      const userProfile = await fetchUserProfile();
-      if (userProfile && fetchedVotings.length > 0) {
+      const rawUserProfile = await fetchUserProfile();
+      const flatUserProfile = flattenProfileData(rawUserProfile); // Flatten profile
+
+
+      if (Object.keys(flatUserProfile).length > 0 && fetchedVotings.length > 0) {
          const relevanceInput: SortTopicsByRelevanceInput = {
           topics: fetchedVotings.map(v => ({
             topicId: v.id,
             title: v.name,
             content: v.description, // Use description for relevance content
           })),
-           userProfile: userProfile as Record<string, string | number>,
+           userProfile: flatUserProfile, // Use flattened profile
          };
 
           try {
+            setIsSorting(true); // Start sorting
             const relevanceOutput: SortTopicsByRelevanceOutput = await sortTopicsByRelevance(relevanceInput);
              const topicOrderMap = new Map(relevanceOutput.map((item, index) => [item.topicId, index]));
             const sorted = [...fetchedVotings].sort((a, b) => {
@@ -176,17 +206,19 @@ export default function VotingPage() {
             setSortedVotings(sorted);
           } catch (error) {
              console.error("Error sorting votings by relevance:", error);
-             toast({ variant: "destructive", title: "AI Sort Error", description: "Could not sort votings by relevance." });
+             toast({ variant: "destructive", title: "AI Sort Error", description: "Could not sort votings by relevance. Using default order." });
              setSortedVotings(fetchedVotings); // Fallback
+          } finally {
+             setIsSorting(false); // End sorting
           }
 
       } else {
            setSortedVotings(fetchedVotings); // Fallback if no profile or votings
+           setIsSorting(false); // Reset sorting state
       }
 
 
       setLoading(false);
-      setIsSorting(false);
     }, (error) => {
       console.error("Error fetching votings: ", error);
       toast({ variant: "destructive", title: "Error", description: "Could not load votings." });
@@ -234,57 +266,65 @@ export default function VotingPage() {
     const votingRef = doc(db, 'votings', votingId);
 
     try {
-        const votingSnap = await getDoc(votingRef);
-        if (!votingSnap.exists()) {
-            throw new Error("Voting not found");
-        }
-        const votingData = votingSnap.data() as VotingTopic; // Assuming type, adjust as needed
+        await runTransaction(db, async (transaction) => {
+            const votingSnap = await transaction.get(votingRef);
+            if (!votingSnap.exists()) {
+                throw new Error("Voting not found");
+            }
+            // Explicitly cast the data to include the 'options' array with the correct type
+            const votingData = votingSnap.data() as Omit<VotingTopic, 'id' | 'totalVotes' | 'userVote'> & { options: VotingTopicOption[] };
 
-        // --- Calculate Voting Weight (Placeholder) ---
-        // This is where you'd implement the logic based on relevance and skillset.
-        // For now, let's assume a weight of 1 for simplicity.
-        const votingWeight = 1;
-        // --- End Placeholder ---
+            // --- Calculate Voting Weight (Placeholder) ---
+            const votingWeight = 1; // Simple weight for now
+            // --- End Placeholder ---
 
+            const currentOptions = votingData.options || [];
+            let userPreviousVoteOptionText: string | null = null;
 
-        const currentOptions = votingData.options || [];
-        const userPreviousVoteOption = currentOptions.find(opt => opt.voters.includes(user.uid));
-
-        // Check if user is changing their vote or voting for the first time
-        if (userPreviousVoteOption && userPreviousVoteOption.text === selectedOptionText) {
-            // User clicked the same option again - potentially unvote (optional feature)
-             console.log("User clicked the same option.");
-             setIsVoting(null); // Reset processing state
-             return; // Or implement unvoting logic here
-        }
-
-        const updatedOptions = currentOptions.map(option => {
-            let newVotes = option.votes;
-            let newVoters = [...option.voters];
-
-            // Remove user from previous vote if they are changing vote
-            if (userPreviousVoteOption && option.text === userPreviousVoteOption.text) {
-                newVotes = Math.max(0, newVotes - votingWeight); // Decrement previous vote
-                newVoters = newVoters.filter(voterId => voterId !== user.uid);
+            // Find the user's previous vote *within the transaction*
+            for (const option of currentOptions) {
+                if (option.voters.includes(user.uid)) {
+                    userPreviousVoteOptionText = option.text;
+                    break;
+                }
             }
 
-            // Add user to the new vote
-            if (option.text === selectedOptionText) {
-                newVotes += votingWeight; // Increment new vote
-                newVoters.push(user.uid);
+            // User clicked the same option - do nothing (or implement unvoting)
+            if (userPreviousVoteOptionText === selectedOptionText) {
+                console.log("User clicked the same option.");
+                return; // Exit transaction
             }
 
-            return { ...option, votes: newVotes, voters: newVoters };
+            const updatedOptions = currentOptions.map(option => {
+                let newVotes = option.votes;
+                let newVoters = [...option.voters]; // Create a new array
+
+                // Remove user from previous vote if changing vote
+                if (userPreviousVoteOptionText && option.text === userPreviousVoteOptionText) {
+                    newVotes = Math.max(0, newVotes - votingWeight); // Decrement previous vote
+                    newVoters = newVoters.filter(voterId => voterId !== user.uid);
+                }
+
+                // Add user to the new vote
+                if (option.text === selectedOptionText) {
+                    // Only add voter if they weren't already there (safeguard)
+                    if (!newVoters.includes(user.uid)) {
+                         newVotes += votingWeight; // Increment new vote
+                         newVoters.push(user.uid);
+                    }
+                }
+
+                return { ...option, votes: newVotes, voters: newVoters };
+            });
+
+            transaction.update(votingRef, { options: updatedOptions });
         });
-
-
-        await updateDoc(votingRef, { options: updatedOptions });
 
         toast({ title: 'Vote Cast', description: `Your vote for "${selectedOptionText}" has been recorded.` });
 
     } catch (error) {
         console.error('Error casting vote:', error);
-        toast({ variant: 'destructive', title: 'Error', description: 'Could not cast vote.' });
+        toast({ variant: 'destructive', title: 'Error', description: `Could not cast vote. ${error instanceof Error ? error.message : ''}` });
     } finally {
        setIsVoting(null); // Reset processing state regardless of success/failure
     }
@@ -295,11 +335,11 @@ export default function VotingPage() {
     <div className="container mx-auto py-8 px-4 md:px-0 h-full flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
-            <VoteIcon className="h-7 w-7" /> Votings
+            <VoteIcon className="h-7 w-7" /> Votings {isSorting && <Loader2 className="h-5 w-5 animate-spin" />}
         </h1>
          <Dialog open={isNewVotingDialogOpen} onOpenChange={setIsNewVotingDialogOpen}>
            <DialogTrigger asChild>
-             <Button>
+             <Button disabled={isSorting}>
                 <PlusCircle className="mr-2 h-4 w-4" /> Create New Voting
              </Button>
            </DialogTrigger>
@@ -376,6 +416,14 @@ export default function VotingPage() {
                                 {newVotingForm.formState.errors.options.root.message}
                             </p>
                          )}
+                          {/* Display field-level errors for options array */}
+                         {newVotingForm.formState.errors.options?.map((error, index) =>
+                             error?.text ? (
+                                <p key={index} className="text-sm font-medium text-destructive">
+                                Option {index + 1}: {error.text.message}
+                                </p>
+                            ) : null
+                         )}
                     </div>
 
 
@@ -394,7 +442,7 @@ export default function VotingPage() {
          </Dialog>
       </div>
 
-       {loading || isSorting ? (
+       {loading ? ( // Show skeleton only during initial load
          <div className="space-y-4">
            <Skeleton className="h-32 w-full" />
            <Skeleton className="h-32 w-full" />
@@ -410,7 +458,7 @@ export default function VotingPage() {
           <ScrollArea className="flex-1 pr-4 -mr-4"> {/* Add ScrollArea */}
              <div className="space-y-4">
              {sortedVotings.map((voting) => (
-                 <Card key={voting.id}>
+                 <Card key={voting.id} className={`${isSorting ? 'opacity-50 pointer-events-none' : ''}`}> {/* Dim while sorting */}
                  <CardHeader>
                      <CardTitle>{voting.name}</CardTitle>
                      <CardDescription>
@@ -425,7 +473,7 @@ export default function VotingPage() {
                      <RadioGroup
                         value={voting.userVote} // Set the currently selected vote
                         onValueChange={(value) => handleVote(voting.id, value)}
-                        disabled={isVoting === voting.id} // Disable while voting on this specific item
+                        disabled={isVoting === voting.id || isSorting} // Disable while voting or sorting
                         className="space-y-3"
                     >
                         {voting.options.map((option, index) => {
@@ -436,14 +484,14 @@ export default function VotingPage() {
                                 <Label
                                     key={index}
                                     htmlFor={`${voting.id}-option-${index}`}
-                                    className={`flex flex-col p-3 border rounded-md hover:bg-accent/10 cursor-pointer ${voting.userVote === option.text ? 'border-primary bg-accent/5' : ''} ${isVoting === voting.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    className={`flex flex-col p-3 border rounded-md hover:bg-accent/10 cursor-pointer ${voting.userVote === option.text ? 'border-primary bg-accent/5' : ''} ${isVoting === voting.id || isSorting ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                      <div className="flex items-center justify-between mb-2">
                                          <div className="flex items-center gap-2">
                                             <RadioGroupItem
                                                 value={option.text}
                                                 id={`${voting.id}-option-${index}`}
-                                                disabled={isVoting === voting.id}
+                                                disabled={isVoting === voting.id || isSorting} // Also disable radio item
                                                 aria-label={option.text}
                                             />
                                             <span className="font-medium">{option.text}</span>
@@ -466,3 +514,4 @@ export default function VotingPage() {
     </div>
   );
 }
+

@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
@@ -33,6 +34,8 @@ import { sortTopicsByRelevance, SortTopicsByRelevanceInput, SortTopicsByRelevanc
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { ProfileFormData } from '../profile/page'; // Import ProfileFormData type
+
 
 // Schemas
 const NewTopicSchema = z.object({
@@ -61,6 +64,25 @@ type Message = {
   userEmail?: string; // Optional: Store email for display
 };
 
+// Function to flatten the profile data
+const flattenProfileData = (profile: ProfileFormData | null): Record<string, string | number> => {
+    if (!profile) return {};
+    const flatProfile: Record<string, string | number> = {};
+    Object.entries(profile).forEach(([sectionKey, sectionValue]) => {
+      if (Array.isArray(sectionValue)) {
+        sectionValue.forEach((item: { key: string; value: string }) => {
+          // Handle potential key collisions if necessary, e.g., prefixing
+          // For now, simple assignment (last one wins if keys collide across sections)
+          if (item.key && item.value) {
+            flatProfile[`${sectionKey}_${item.key.replace(/\s+/g, '_')}`] = item.value;
+          }
+        });
+      }
+    });
+    return flatProfile;
+};
+
+
 export default function ChatPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -86,12 +108,12 @@ export default function ChatPage() {
   });
 
   // Fetch User Profile for Relevance Sorting
-  const fetchUserProfile = useCallback(async (): Promise<DocumentData | null> => {
+  const fetchUserProfile = useCallback(async (): Promise<ProfileFormData | null> => {
     if (!user) return null;
     try {
       const profileRef = doc(db, 'profiles', user.uid);
       const profileSnap = await getDoc(profileRef);
-      return profileSnap.exists() ? profileSnap.data() : null;
+      return profileSnap.exists() ? profileSnap.data() as ProfileFormData : null; // Cast to ProfileFormData
     } catch (error) {
       console.error("Error fetching user profile for relevance:", error);
       return null;
@@ -117,7 +139,7 @@ export default function ChatPage() {
            if(userId === user?.uid) return user?.email || 'Unknown User';
            // Basic fetch attempt (might need security rules adjustment)
            const userDoc = await getDoc(doc(db, 'users', userId)); // Assuming a 'users' collection
-           const email = userDoc.exists() ? userDoc.data().email : 'Unknown User';
+           const email = userDoc.exists() && userDoc.data()?.email ? userDoc.data().email : 'Unknown User';
            userEmails[userId] = email;
            return email;
         } catch (error) {
@@ -143,18 +165,21 @@ export default function ChatPage() {
       setTopics(fetchedTopics); // Update the raw list first
 
       // Sort by relevance using AI
-      const userProfile = await fetchUserProfile();
-      if (userProfile && fetchedTopics.length > 0) {
+      const rawUserProfile = await fetchUserProfile();
+       const flatUserProfile = flattenProfileData(rawUserProfile); // Flatten the profile data
+
+      if (Object.keys(flatUserProfile).length > 0 && fetchedTopics.length > 0) {
         const relevanceInput: SortTopicsByRelevanceInput = {
           topics: fetchedTopics.map(t => ({
             topicId: t.id,
             title: t.name,
             content: t.firstMessage || t.name, // Use first message or title for content
           })),
-          userProfile: userProfile as Record<string, string | number>, // Cast needed if profile has mixed types
+          userProfile: flatUserProfile, // Use the flattened profile
         };
 
         try {
+          setIsSorting(true); // Indicate sorting started
           const relevanceOutput: SortTopicsByRelevanceOutput = await sortTopicsByRelevance(relevanceInput);
            const topicOrderMap = new Map(relevanceOutput.map((item, index) => [item.topicId, index]));
            const sorted = [...fetchedTopics].sort((a, b) => {
@@ -165,16 +190,18 @@ export default function ChatPage() {
           setSortedTopics(sorted);
         } catch (error) {
           console.error("Error sorting topics by relevance:", error);
-          toast({ variant: "destructive", title: "AI Sort Error", description: "Could not sort topics by relevance." });
+          toast({ variant: "destructive", title: "AI Sort Error", description: "Could not sort topics by relevance. Using default order." });
           setSortedTopics(fetchedTopics); // Fallback to default sort
+        } finally {
+           setIsSorting(false); // Indicate sorting finished
         }
 
       } else {
          setSortedTopics(fetchedTopics); // Use default sort if no profile or no topics
+         setIsSorting(false); // Ensure sorting state is reset
       }
 
       setLoadingTopics(false);
-      setIsSorting(false);
     }, (error) => {
         console.error("Error fetching topics: ", error);
         toast({ variant: "destructive", title: "Error", description: "Could not load chat topics." });
@@ -207,7 +234,7 @@ export default function ChatPage() {
          try {
            if(userId === user?.uid) return user?.email || 'Unknown User';
            const userDoc = await getDoc(doc(db, 'users', userId)); // Assuming a 'users' collection
-           const email = userDoc.exists() ? userDoc.data().email : 'Unknown User';
+           const email = userDoc.exists() && userDoc.data()?.email ? userDoc.data().email : 'Unknown User';
            userEmails[userId] = email;
            return email;
          } catch (error) {
@@ -305,11 +332,11 @@ export default function ChatPage() {
       <div className="container mx-auto py-8 px-4 md:px-0 h-full flex flex-col">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
-             <MessageSquare className="h-7 w-7" /> Chat Topics
+             <MessageSquare className="h-7 w-7" /> Chat Topics {isSorting && <Loader2 className="h-5 w-5 animate-spin" />}
           </h1>
           <Dialog open={isNewTopicDialogOpen} onOpenChange={setIsNewTopicDialogOpen}>
             <DialogTrigger asChild>
-               <Button>
+               <Button disabled={isSorting}>
                 <PlusCircle className="mr-2 h-4 w-4" /> Create New Topic
               </Button>
             </DialogTrigger>
@@ -356,7 +383,7 @@ export default function ChatPage() {
           </Dialog>
         </div>
 
-        {loadingTopics || isSorting ? (
+        {loadingTopics ? ( // Show skeleton only during initial load
           <div className="space-y-4">
             <Skeleton className="h-20 w-full" />
             <Skeleton className="h-20 w-full" />
@@ -374,8 +401,8 @@ export default function ChatPage() {
                 {sortedTopics.map((topic) => (
                     <Card
                     key={topic.id}
-                    className="cursor-pointer hover:shadow-md transition-shadow"
-                    onClick={() => selectTopic(topic)}
+                    className={`cursor-pointer hover:shadow-md transition-shadow ${isSorting ? 'opacity-50 pointer-events-none' : ''}`} // Dim while sorting
+                    onClick={() => !isSorting && selectTopic(topic)} // Prevent selection while sorting
                     >
                     <CardHeader>
                         <CardTitle>{topic.name}</CardTitle>
@@ -474,3 +501,4 @@ export default function ChatPage() {
     </div>
   );
 }
+

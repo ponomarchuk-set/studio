@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
@@ -35,6 +36,8 @@ import { sortTopicsByRelevance, SortTopicsByRelevanceInput, SortTopicsByRelevanc
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from '@/components/ui/scroll-area';
+import type { ProfileFormData } from '../profile/page'; // Import ProfileFormData type
+
 
 // Schemas
 const TaskSchema = z.object({
@@ -54,6 +57,23 @@ type Task = {
   creatorEmail?: string; // Optional
 };
 
+// Function to flatten the profile data (copied from ChatPage, could be moved to a util)
+const flattenProfileData = (profile: ProfileFormData | null): Record<string, string | number> => {
+    if (!profile) return {};
+    const flatProfile: Record<string, string | number> = {};
+    Object.entries(profile).forEach(([sectionKey, sectionValue]) => {
+      if (Array.isArray(sectionValue)) {
+        sectionValue.forEach((item: { key: string; value: string }) => {
+          if (item.key && item.value) {
+            flatProfile[`${sectionKey}_${item.key.replace(/\s+/g, '_')}`] = item.value;
+          }
+        });
+      }
+    });
+    return flatProfile;
+};
+
+
 export default function TasksPage() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -72,12 +92,12 @@ export default function TasksPage() {
   });
 
     // Fetch User Profile for Relevance Sorting
-  const fetchUserProfile = useCallback(async (): Promise<DocumentData | null> => {
+  const fetchUserProfile = useCallback(async (): Promise<ProfileFormData | null> => { // Return ProfileFormData
     if (!user) return null;
     try {
       const profileRef = doc(db, 'profiles', user.uid);
       const profileSnap = await getDoc(profileRef);
-      return profileSnap.exists() ? profileSnap.data() : null;
+      return profileSnap.exists() ? profileSnap.data() as ProfileFormData : null; // Cast to ProfileFormData
     } catch (error) {
       console.error("Error fetching user profile for relevance:", error);
       return null;
@@ -91,7 +111,7 @@ export default function TasksPage() {
         return; // Don't fetch if user is not logged in
     };
     setLoading(true);
-    setIsSorting(true);
+
     // Query tasks created by the current user
     const q = query(
         collection(db, 'tasks'),
@@ -121,18 +141,22 @@ export default function TasksPage() {
       setTasks(fetchedTasks); // Update raw list
 
        // Sort by relevance using AI (Optional: Could also sort by completion status or rating client-side)
-      const userProfile = await fetchUserProfile();
-      if (userProfile && fetchedTasks.length > 0) {
+      const rawUserProfile = await fetchUserProfile();
+      const flatUserProfile = flattenProfileData(rawUserProfile); // Flatten profile
+
+
+      if (Object.keys(flatUserProfile).length > 0 && fetchedTasks.length > 0) {
          const relevanceInput: SortTopicsByRelevanceInput = {
            topics: fetchedTasks.map(t => ({ // Treat tasks as "topics" for the AI
              topicId: t.id,
              title: t.title,
              content: t.description || t.title, // Use description or title for content
            })),
-           userProfile: userProfile as Record<string, string | number>,
+           userProfile: flatUserProfile, // Use flattened profile
          };
 
          try {
+           setIsSorting(true); // Start sorting
            const relevanceOutput: SortTopicsByRelevanceOutput = await sortTopicsByRelevance(relevanceInput);
             const topicOrderMap = new Map(relevanceOutput.map((item, index) => [item.topicId, index]));
            const sorted = [...fetchedTasks].sort((a, b) => {
@@ -143,15 +167,17 @@ export default function TasksPage() {
            setSortedTasks(sorted);
          } catch (error) {
            console.error("Error sorting tasks by relevance:", error);
-           toast({ variant: "destructive", title: "AI Sort Error", description: "Could not sort tasks by relevance." });
+           toast({ variant: "destructive", title: "AI Sort Error", description: "Could not sort tasks by relevance. Using default order." });
            setSortedTasks(fetchedTasks); // Fallback
+         } finally {
+            setIsSorting(false); // End sorting
          }
       } else {
          setSortedTasks(fetchedTasks); // Fallback
+         setIsSorting(false); // Ensure sorting state is reset
       }
 
       setLoading(false);
-      setIsSorting(false);
     }, (error) => {
       console.error("Error fetching tasks: ", error);
       toast({ variant: "destructive", title: "Error", description: "Could not load tasks." });
@@ -251,11 +277,11 @@ export default function TasksPage() {
     <div className="container mx-auto py-8 px-4 md:px-0 h-full flex flex-col">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold text-primary flex items-center gap-2">
-             <ListChecks className="h-7 w-7" /> Tasks
+             <ListChecks className="h-7 w-7" /> Tasks {isSorting && <Loader2 className="h-5 w-5 animate-spin" />}
         </h1>
          <Dialog open={isFormDialogOpen} onOpenChange={setIsFormDialogOpen}>
             <DialogTrigger asChild>
-                <Button onClick={openNewDialog}>
+                <Button onClick={openNewDialog} disabled={isSorting}>
                     <PlusCircle className="mr-2 h-4 w-4" /> Add New Task
                 </Button>
             </DialogTrigger>
@@ -347,7 +373,7 @@ export default function TasksPage() {
          </Dialog>
       </div>
 
-      {loading || isSorting ? (
+      {loading ? ( // Show skeleton only during initial load
          <div className="space-y-4">
            <Skeleton className="h-24 w-full" />
            <Skeleton className="h-24 w-full" />
@@ -363,7 +389,7 @@ export default function TasksPage() {
             <ScrollArea className="flex-1 pr-4 -mr-4"> {/* Add ScrollArea */}
                  <div className="space-y-4">
                  {sortedTasks.map((task) => (
-                     <Card key={task.id} className={`transition-opacity ${task.completed ? 'opacity-60' : ''}`}>
+                     <Card key={task.id} className={`transition-opacity ${task.completed ? 'opacity-60' : ''} ${isSorting ? 'opacity-50 pointer-events-none' : ''}`}> {/* Dim while sorting */}
                      <CardContent className="p-4 flex items-start gap-4">
                          <Checkbox
                              id={`task-${task.id}`}
@@ -371,12 +397,13 @@ export default function TasksPage() {
                              onCheckedChange={() => handleToggleComplete(task)}
                              aria-label={`Mark task "${task.title}" as ${task.completed ? 'incomplete' : 'complete'}`}
                              className="mt-1"
+                             disabled={isSorting} // Disable checkbox while sorting
                          />
                          <div className="flex-1 grid gap-1">
                              <label
                                 htmlFor={`task-${task.id}`}
                                 className={`font-medium cursor-pointer ${task.completed ? 'line-through text-muted-foreground' : ''}`}
-                                onClick={(e) => { e.preventDefault(); handleToggleComplete(task); }} // Toggle on label click too
+                                onClick={(e) => { e.preventDefault(); !isSorting && handleToggleComplete(task); }} // Toggle on label click too, prevent if sorting
                              >
                                  {task.title}
                              </label>
@@ -398,14 +425,14 @@ export default function TasksPage() {
                              </span>
                          </div>
                          <div className="flex gap-1">
-                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(task)} disabled={isProcessing} aria-label={`Edit task ${task.title}`}>
+                             <Button variant="ghost" size="icon" onClick={() => openEditDialog(task)} disabled={isProcessing || isSorting} aria-label={`Edit task ${task.title}`}>
                                  <Edit2 className="h-4 w-4" />
                              </Button>
                              <Button
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => handleDeleteTask(task.id)}
-                                disabled={isProcessing}
+                                disabled={isProcessing || isSorting} // Disable delete while processing or sorting
                                 className="text-destructive hover:text-destructive hover:bg-destructive/10"
                                 aria-label={`Delete task ${task.title}`}
                              >
@@ -421,3 +448,4 @@ export default function TasksPage() {
     </div>
   );
 }
+

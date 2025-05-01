@@ -36,7 +36,7 @@ const ProfileSchema = z.object({
   contacts: ProfileSectionSchema,
 });
 
-type ProfileFormData = z.infer<typeof ProfileSchema>;
+export type ProfileFormData = z.infer<typeof ProfileSchema>;
 
 const profileSections: (keyof ProfileFormData)[] = [
   "demographics",
@@ -182,6 +182,7 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-primary">Your Profile</h1>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          {/* Removed collapsible prop */}
           <Accordion type="multiple" className="w-full space-y-4">
             {profileSections.map((sectionName) => (
               <ProfileSection
