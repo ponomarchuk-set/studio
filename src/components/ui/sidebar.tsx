@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -7,7 +8,7 @@ import { Menu, PanelLeft } from "lucide-react" // Import Menu
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button" // Import buttonVariants
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
@@ -260,31 +261,32 @@ const Sidebar = React.forwardRef<
 Sidebar.displayName = "Sidebar"
 
 const SidebarTrigger = React.forwardRef<
-  React.ElementRef<typeof Button>,
+  HTMLButtonElement, // Change ref type to HTMLButtonElement
   React.ComponentProps<typeof Button>
->(({ className, onClick, children, ...props }, ref) => { // Added children prop
+>(({ className, onClick, children, variant = "ghost", size = "icon", ...props }, ref) => { // Added variant, size defaults
   const { toggleSidebar } = useSidebar()
 
   return (
     <Button
       ref={ref}
       data-sidebar="trigger"
-      variant="ghost"
-      size="icon"
-      className={cn("h-7 w-7", className)}
+      variant={variant} // Pass variant
+      size={size} // Pass size
+      className={cn("h-7 w-7", className)} // Keep size class here for potential overrides
       onClick={(event) => {
         onClick?.(event)
         toggleSidebar()
       }}
       {...props}
     >
-       {/* Use Menu icon for mobile trigger */}
+       {/* Render children if provided, otherwise default to Menu icon */}
       {children ?? <Menu className="h-5 w-5" />}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   )
 })
 SidebarTrigger.displayName = "SidebarTrigger"
+
 
 const SidebarRail = React.forwardRef<
   HTMLButtonElement,
