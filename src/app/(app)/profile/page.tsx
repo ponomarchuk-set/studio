@@ -135,20 +135,34 @@ export default function ProfilePage() {
   const fetchRegisteredUsers = useCallback(async () => {
     setLoadingUsers(true);
     try {
-        const usersCol = collection(db, "users");
-        const usersSnapshot = await getDocs(usersCol);
-        const usersList = usersSnapshot.docs.map(doc => ({
-            uid: doc.id,
-            email: doc.data().email || "No email", // Assuming email is stored
-        }));
+        // Ensure user collection exists
+        const usersColRef = collection(db, "users");
+        // Add a dummy doc if collection potentially doesn't exist (optional, depends on rules)
+        // await setFirestoreDoc(doc(usersColRef, '--init--'), { initialized: true }, { merge: true });
+
+        const usersSnapshot = await getDocs(usersColRef);
+        const usersList = usersSnapshot.docs
+            .filter(doc => doc.id !== '--init--') // Filter out dummy doc if used
+            .map(doc => ({
+                uid: doc.id,
+                email: doc.data().email || "No email", // Assuming email is stored
+            }));
         setRegisteredUsers(usersList);
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error fetching registered users:", error);
-        toast({
-            variant: "destructive",
-            title: "Error",
-            description: "Could not load registered users.",
-        });
+        if (error.code === 'permission-denied') {
+             toast({
+                variant: "destructive",
+                title: "Permission Denied",
+                description: "Could not load registered users due to permissions. Check Firestore rules.",
+            });
+        } else {
+            toast({
+                variant: "destructive",
+                title: "Error",
+                description: "Could not load registered users.",
+            });
+        }
         setRegisteredUsers([]); // Reset on error
     } finally {
         setLoadingUsers(false);
@@ -211,7 +225,8 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-primary">Your Profile</h1>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <Accordion type="multiple" defaultValue={profileSections} collapsible className="w-full space-y-4">
+          {/* Remove invalid 'collapsible' prop */}
+          <Accordion type="multiple" defaultValue={profileSections} className="w-full space-y-4">
             {profileSections.map((sectionName) => (
               <ProfileSection
                 key={sectionName}
@@ -286,14 +301,13 @@ function ProfileSection({ control, sectionName, title, register, setValue, getVa
 
 
   return (
-     <AccordionItem value={sectionName} className="border rounded-lg shadow-sm overflow-hidden bg-card">
+     <AccordionItem value={sectionName} className="border-none rounded-lg shadow-sm overflow-hidden bg-card">
        <AccordionTrigger className="px-6 py-4 hover:no-underline">
           <span className="text-xl font-semibold text-primary">{title}</span>
         </AccordionTrigger>
         <AccordionContent className="px-6 pb-6 pt-0">
-           <div className="space-y-4"> {/* Container for all fields in the section */}
+           <div className="space-y-2"> {/* Reduced vertical spacing */}
               {fields.map((field, index) => (
-                 // Remove border-b and pb-3 from this div
                 <div key={field.id} className="flex items-end gap-2"> {/* Group fields horizontally */}
                    {/* Key Field */}
                    <FormField
