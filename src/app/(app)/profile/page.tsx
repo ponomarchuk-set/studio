@@ -211,7 +211,7 @@ export default function ProfilePage() {
       <h1 className="text-3xl font-bold mb-6 text-primary">Your Profile</h1>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <Accordion type="multiple" collapsible={true} className="w-full space-y-4">
+          <Accordion type="multiple" defaultValue={profileSections} collapsible className="w-full space-y-4">
             {profileSections.map((sectionName) => (
               <ProfileSection
                 key={sectionName}
@@ -293,7 +293,8 @@ function ProfileSection({ control, sectionName, title, register, setValue, getVa
         <AccordionContent className="px-6 pb-6 pt-0">
            <div className="space-y-4"> {/* Container for all fields in the section */}
               {fields.map((field, index) => (
-                <div key={field.id} className="flex items-end gap-2 border-b pb-3 last:border-b-0"> {/* Group fields horizontally, add bottom border */}
+                 // Remove border-b and pb-3 from this div
+                <div key={field.id} className="flex items-end gap-2"> {/* Group fields horizontally */}
                    {/* Key Field */}
                    <FormField
                     control={control}
@@ -402,4 +403,3 @@ function ProfileSection({ control, sectionName, title, register, setValue, getVa
       </AccordionItem>
   );
 }
-
